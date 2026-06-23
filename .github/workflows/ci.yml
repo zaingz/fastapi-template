@@ -38,7 +38,39 @@ jobs:
         run: uv run mypy app/
 
       - name: Test
-        run: uv run pytest tests/ -v --cov=app --cov-report=term-missing
+        run: uv run pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=80
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Ruff security rules (flake8-bandit)
+        # Use the lockfile-pinned ruff (uv run), not an unpinned uvx fetch, so the
+        # security gate can't drift or break on a new ruff release.
+        run: uv run ruff check --select S .
+
+      - name: Export locked dependencies
+        run: uv export --format requirements-txt --all-groups --no-emit-project -o requirements.audit.txt
+
+      - name: Dependency vulnerability audit
+        # Advisory: surfaces CVEs in the locked dependency set without blocking merges,
+        # since most transitive fixes wait on a compatible fastapi/starlette release.
+        # Triage via `uv lock --upgrade` (see docs/production.md "Dependency hygiene").
+        # pip-audit is version-pinned so the advisory output is reproducible.
+        continue-on-error: true
+        run: uvx pip-audit@2.10.1 -r requirements.audit.txt
 
   docker:
     runs-on: ubuntu-latest

@@ -1,0 +1,139 @@
+import asyncio
+import time
+
+import httpx
+import pytest
+
+from app.core.exceptions import (
+    UpstreamError,
+    UpstreamRateLimitError,
+    UpstreamTimeoutError,
+)
+from app.core.resilience import (
+    classify_httpx_exception,
+    raise_for_upstream,
+    retry_async,
+)
+
+
+def _response(status: int, headers: dict[str, str] | None = None) -> httpx.Response:
+    request = httpx.Request("GET", "https://upstream.test/x")
+    return httpx.Response(status, headers=headers or {}, request=request)
+
+
+def test_raise_for_upstream_passes_through_2xx():
+    response = _response(200)
+    assert raise_for_upstream(response) is response
+
+
+def test_raise_for_upstream_429_is_rate_limit_with_retry_after():
+    with pytest.raises(UpstreamRateLimitError) as exc:
+        raise_for_upstream(_response(429, {"Retry-After": "7"}))
+    assert exc.value.retry_after == 7.0
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_raise_for_upstream_transient_5xx(status):
+    with pytest.raises(UpstreamTimeoutError):
+        raise_for_upstream(_response(status))
+
+
+def test_raise_for_upstream_400_is_non_retryable():
+    with pytest.raises(UpstreamError) as exc:
+        raise_for_upstream(_response(400))
+    assert not isinstance(exc.value, UpstreamTimeoutError | UpstreamRateLimitError)
+
+
+def test_classify_timeout_is_transient():
+    classified = classify_httpx_exception(httpx.ReadTimeout("slow"))
+    assert isinstance(classified, UpstreamTimeoutError)
+
+
+def test_classify_protocol_error_is_non_retryable():
+    classified = classify_httpx_exception(httpx.RemoteProtocolError("bad frame"))
+    assert isinstance(classified, UpstreamError)
+    assert not isinstance(classified, UpstreamTimeoutError)
+
+
+async def test_retry_async_retries_transient_then_succeeds():
+    calls = 0
+
+    async def flaky() -> str:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise UpstreamTimeoutError()
+        return "ok"
+
+    result = await retry_async(flaky, retries=3, base_delay=0.0, max_delay=0.0)
+    assert result == "ok"
+    assert calls == 3
+
+
+async def test_retry_async_does_not_retry_non_transient():
+    calls = 0
+
+    async def boom() -> str:
+        nonlocal calls
+        calls += 1
+        raise UpstreamError()
+
+    with pytest.raises(UpstreamError):
+        await retry_async(boom, retries=3, base_delay=0.0, max_delay=0.0)
+    assert calls == 1  # no blanket retry
+
+
+async def test_retry_async_exhausts_then_raises():
+    async def always_timeout() -> str:
+        raise UpstreamTimeoutError()
+
+    with pytest.raises(UpstreamTimeoutError):
+        await retry_async(always_timeout, retries=2, base_delay=0.0, max_delay=0.0)
+
+
+async def test_retry_async_clamps_huge_retry_after_to_max_delay():
+    # A hostile/misconfigured upstream advertising a 1-hour Retry-After must not pin the
+    # caller; the honored delay is clamped to max_delay.
+    calls = 0
+
+    async def rate_limited() -> str:
+        nonlocal calls
+        calls += 1
+        if calls < 2:
+            raise UpstreamRateLimitError(retry_after=3600.0)
+        return "ok"
+
+    start = time.perf_counter()
+    result = await retry_async(rate_limited, retries=2, base_delay=0.0, max_delay=0.05)
+    elapsed = time.perf_counter() - start
+
+    assert result == "ok"
+    assert calls == 2
+    assert elapsed < 1.0  # clamped to ~0.05s, nowhere near the advertised 3600s
+
+
+async def test_retry_async_honors_retry_after_up_to_cap():
+    # The honored value still raises the floor (vs. jitter) but never exceeds max_delay.
+    async def rate_limited() -> str:
+        raise UpstreamRateLimitError(retry_after=10.0)
+
+    start = time.perf_counter()
+    with pytest.raises(UpstreamRateLimitError):
+        await retry_async(rate_limited, retries=1, base_delay=0.0, max_delay=0.05)
+    elapsed = time.perf_counter() - start
+    assert 0.04 <= elapsed < 1.0  # slept ~max_delay once, not 10s
+
+
+async def test_retry_async_propagates_cancellation():
+    # CancelledError is a BaseException, not UpstreamError, so it must propagate immediately
+    # and never be swallowed or retried.
+    calls = 0
+
+    async def cancelled() -> str:
+        nonlocal calls
+        calls += 1
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await retry_async(cancelled, retries=3, base_delay=0.0, max_delay=0.0)
+    assert calls == 1

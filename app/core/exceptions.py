@@ -32,6 +32,67 @@ class ValidationError(AppException):
     code = "VALIDATION_FAILED"
 
 
-# ponytail: auth/rate-limit error types are intentionally absent — those features are
-# documented "Ask first" seams, not bundled. Add an AppException subclass here (status_code +
-# code) when you wire the matching feature; NotFoundError above is the pattern to copy.
+class RequestTooLargeError(AppException):
+    status_code = 413
+    code = "REQUEST_TOO_LARGE"
+    message = "Request body too large"
+
+
+class RateLimitError(AppException):
+    """Raised when a caller exceeds the configured rate limit.
+
+    `retry_after` (seconds) is surfaced as a `Retry-After` response header.
+    """
+
+    status_code = 429
+    code = "RATE_LIMITED"
+    message = "Rate limit exceeded"
+
+    def __init__(
+        self,
+        message: str | None = None,
+        details: dict[str, Any] | None = None,
+        *,
+        retry_after: int | None = None,
+    ) -> None:
+        super().__init__(message=message, details=details)
+        self.retry_after = retry_after
+
+
+# ── Downstream / upstream taxonomy ────────────────────────────────────────────
+# Failures calling other services. Only *transient* subclasses are safe to retry;
+# see app/core/resilience.py for the classification used by the retry helper.
+
+
+class UpstreamError(AppException):
+    """A downstream/upstream dependency call failed. Not retryable by default."""
+
+    status_code = 502
+    code = "UPSTREAM_ERROR"
+    message = "A downstream service returned an error"
+
+
+class UpstreamTimeoutError(UpstreamError):
+    """Downstream call exceeded its timeout. Transient — safe to retry."""
+
+    status_code = 504
+    code = "UPSTREAM_TIMEOUT"
+    message = "A downstream service did not respond in time"
+
+
+class UpstreamRateLimitError(UpstreamError):
+    """Downstream returned 429. Transient — retry honoring Retry-After."""
+
+    status_code = 429
+    code = "UPSTREAM_RATE_LIMITED"
+    message = "A downstream service rate-limited the request"
+
+    def __init__(
+        self,
+        message: str | None = None,
+        details: dict[str, Any] | None = None,
+        *,
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(message=message, details=details)
+        self.retry_after = retry_after

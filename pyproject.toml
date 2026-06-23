@@ -12,7 +12,14 @@ dependencies = [
     "structlog>=24.1",
     "asgi-correlation-id>=4.3",
     "uvicorn-worker>=0.3",
+    # Shared outbound HTTP client for downstream calls (already pulled in by fastapi[standard]).
+    "httpx>=0.28",
 ]
+
+# Opt-in extras — NOT installed by default. The default path stays key-free and offline.
+# Install a recipe's deps with e.g. `uv sync --extra redis`.
+[project.optional-dependencies]
+redis = ["redis>=5.0"]
 
 [dependency-groups]
 dev = [
@@ -48,8 +55,13 @@ select = [
     "C4",  # flake8-comprehensions
     "SIM", # flake8-simplify
     "TCH", # flake8-type-checking
+    "S",   # flake8-bandit (security)
 ]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use assert (S101) and fixed test secrets (S106) — not security-relevant.
+"tests/**" = ["S101", "S106"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

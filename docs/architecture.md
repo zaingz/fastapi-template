@@ -11,12 +11,19 @@ app/
 ├── core/                        # cross-cutting infrastructure (no business logic)
 │   ├── config.py                # Settings (pydantic-settings) + get_settings() singleton
 │   ├── dependencies.py          # shared Annotated DI aliases (SettingsDep)
-│   ├── exceptions.py            # AppException hierarchy (status_code + code + message)
-│   ├── exception_handlers.py    # maps exceptions → uniform JSON error body
+│   ├── exceptions.py            # AppException hierarchy (incl. RateLimit/Upstream taxonomy)
+│   ├── exception_handlers.py    # maps exceptions → uniform JSON error body (+ request_id)
+│   ├── http_client.py           # lifespan-managed shared httpx.AsyncClient + HttpClientDep
+│   ├── resilience.py            # upstream error taxonomy + stdlib retry/backoff helper
+│   ├── rate_limit.py            # RateLimiter Protocol + InMemoryFixedWindowRateLimiter
 │   ├── lifespan.py              # async startup/shutdown; resource init/teardown
 │   └── logging.py               # structlog configuration (console or JSON)
 ├── middleware/                  # ASGI middleware
-│   └── timing.py                # X-Process-Time header
+│   ├── timing.py                # X-Process-Time header
+│   ├── access_log.py            # one structured access log per request; binds request_id
+│   ├── security.py              # security response headers (CSP/HSTS/…)
+│   ├── request_size.py          # 413 on oversized bodies (MAX_REQUEST_BYTES)
+│   └── rate_limit.py            # per-client 429 + Retry-After (opt-in)
 ├── ai/                          # AI domain (business logic, no HTTP primitives)
 │   ├── schemas.py               # ChatMessage/Request/Response + ChatStreamEvent
 │   ├── providers.py             # ChatProvider Protocol + EchoChatProvider + build/get_provider
@@ -67,15 +74,29 @@ the Protocol with a **lazy-imported** SDK behind an opt-in optional dependency a
 
 ## Request lifecycle
 
-1. **CorrelationIdMiddleware** assigns/propagates `X-Request-ID` (bound into every log line).
-2. **TimingMiddleware** records wall time, sets `X-Process-Time` on the response.
-3. **CORSMiddleware** applies origin policy.
-4. Router dispatches to the matching `api/v1/endpoints` handler.
-5. The handler resolves dependencies (`SettingsDep`, `ItemServiceDep`) and delegates to a service.
-6. The service runs business logic and raises `AppException` subclasses on failure.
-7. `exception_handlers` convert any error into the uniform body below; structlog emits the log.
+Middleware execution order (outermost first; registered in `main.py` in reverse, last added runs
+outermost). Conditional layers (`if`) activate from settings:
 
-Middleware is registered in `main.py` in reverse execution order (last added runs outermost).
+1. **CorrelationIdMiddleware** assigns/propagates `X-Request-ID`.
+2. **AccessLogMiddleware** binds `request_id` into structlog contextvars and emits one structured
+   access log per request (`method`, `path`, `status`, `duration_ms`, `request_id`).
+3. **TrustedHostMiddleware** *(if `ALLOWED_HOSTS`)* rejects spoofed `Host` headers with `400`.
+4. **CORSMiddleware** applies origin policy (tight `allow_headers` by default).
+5. **SecurityHeadersMiddleware** *(if `SECURITY_HEADERS_ENABLED`)* sets `X-Content-Type-Options`,
+   `X-Frame-Options`, CSP `frame-ancestors`, `Referrer-Policy`, `Permissions-Policy`, and HSTS
+   *(if `HSTS_ENABLED`)*.
+6. **RequestSizeLimitMiddleware** rejects bodies over `MAX_REQUEST_BYTES` with a uniform `413`.
+7. **RateLimitMiddleware** *(if `RATE_LIMIT_ENABLED`)* limits per client IP; `429` + `Retry-After`.
+8. **TimingMiddleware** records wall time, sets `X-Process-Time`.
+9. Router dispatches to the matching `api/v1/endpoints` handler.
+10. The handler resolves dependencies (`SettingsDep`, `HttpClientDep`, `ItemServiceDep`, …) and
+    delegates to a service.
+11. The service runs business logic and raises `AppException` subclasses on failure.
+12. `exception_handlers` convert any error into the uniform body below (including `request_id`);
+    structlog emits the log.
+
+Production guardrails, downstream resilience, rate limiting, and the DDoS responsibility split are
+documented in [`production.md`](production.md).
 
 ### Uniform error body
 
@@ -87,9 +108,13 @@ Every error response (handled or unhandled) is shaped by `_error_body`:
   "message": "Item 'abc' not found",
   "details": {},
   "timestamp": "2026-06-23T12:00:00+00:00",
-  "path": "/api/v1/items/abc"
+  "path": "/api/v1/items/abc",
+  "request_id": "0HMV…"
 }
 ```
+
+`request_id` mirrors the `X-Request-ID` header so a client error can be traced to its log line.
+`429` responses (rate limit / upstream rate limit) also carry a `Retry-After` header.
 
 ## Invariants
 
@@ -139,13 +164,17 @@ Mirror the `items` resource. To add resource `widgets`:
 The template stays minimal. When the application needs them, wire these in at the marked seams:
 
 - **Database** — SQLAlchemy 2.0 async engine + Alembic. Init the engine in `lifespan.py`
-  (`app.state.db_engine`), expose an `AsyncSession` DI alias, replace the in-memory store in a
-  service with a repository.
+  (`app.state.db_engine`, next to the HTTP client), expose an `AsyncSession` DI alias, replace the
+  in-memory store in a service with a repository.
 - **Auth** — JWT dependency in `core/`, surfaced as an `Annotated` current-user alias; add
   `UnauthorizedError` (401) / `ForbiddenError` (403) `AppException` subclasses in `core/exceptions.py`.
 - **Background tasks** — ARQ or Celery; start/stop the worker client in `lifespan.py`.
-- **Rate limiting** — slowapi middleware; add a `RateLimitError` (429) `AppException` subclass.
-- **Observability** — OpenTelemetry instrumentation alongside the structlog setup.
+- **Shared cache / rate limiter** — back `CacheBackend` / `RateLimiter` with Redis for multi-instance
+  correctness ([recipes](recipes/redis-cache.md)). The Protocols and error taxonomy already exist.
+- **Real LLM providers** — implement `ChatProvider` with a lazy-imported SDK
+  ([recipes](recipes/)). `RateLimitError`/`Upstream*` taxonomy and the resilience helper are built in.
+- **Vector search** — add a `VectorStore` seam (pgvector/Qdrant) — [recipe](recipes/vector-store.md).
+- **Observability** — Prometheus/OpenTelemetry alongside structlog — [recipe](recipes/metrics-tracing.md).
 
 See [`docs/adr/0001-template-architecture.md`](./adr/0001-template-architecture.md) for the
-rationale behind these decisions.
+rationale, and [`production.md`](production.md) for the production guardrails.

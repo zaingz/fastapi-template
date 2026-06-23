@@ -98,14 +98,19 @@ Honesty first — here's exactly what runs today and what's a deliberate, docume
 | ✅ Works offline, today | 🔌 Documented opt-in seam |
 |------------------------|---------------------------|
 | `echo` provider (`echo-1`), no key/network | Real LLM provider via the `ChatProvider` Protocol |
-| Buffered + streaming (SSE) chat | Shared cache via the `CacheBackend` Protocol (e.g. Redis) |
-| In-process TTL + LRU response cache | Semantic / vector cache (out of scope for a starter) |
-| Typed config, structured logs, uniform errors | Database, auth, queues, rate limiting, OpenTelemetry |
-| Health + readiness probes, Docker contract | — |
+| Buffered + streaming (SSE) chat | Shared cache / rate limiter via Redis (Protocol-conformant) |
+| In-process TTL + LRU response cache | Vector search (pgvector / Qdrant) via a `VectorStore` seam |
+| Security headers, request-size cap, Host allow-list | Metrics & tracing (Prometheus / OpenTelemetry) |
+| Per-client rate limiting (opt-in, in-process) | Database, auth, queues |
+| Shared `httpx` client + retry/backoff + upstream taxonomy | Distributed retries (`tenacity`/`stamina`) |
+| Structured access logs + `request_id` in every error | Semantic / vector cache |
+| Typed config, uniform errors, health + readiness probes | — |
 
 Seams are wired but not pre-built: you add the class behind a lazy import and an opt-in extra, so the
-default install and the test suite stay dependency-free. Runtime deps are deliberately few:
-`fastapi[standard]`, `gunicorn`, `structlog`, `asgi-correlation-id`, `uvicorn-worker`.
+default install and the test suite stay dependency-free and offline. Runtime deps are deliberately
+few: `fastapi[standard]`, `gunicorn`, `structlog`, `asgi-correlation-id`, `uvicorn-worker`, `httpx`.
+Production guarantees and copy-paste recipes live in [`docs/production.md`](./docs/production.md) and
+[`docs/recipes/`](./docs/recipes/).
 
 ## Features
 
@@ -116,9 +121,13 @@ default install and the test suite stay dependency-free. Runtime deps are delibe
 | **Caching** | `CacheBackend` Protocol + in-process exact-match TTL **+ LRU** cache; prompt/model/version-aware keys |
 | **Typed config** | `pydantic-settings`, `SecretStr` for secrets; one `Settings` object injected via DI |
 | **Structured logging** | `structlog` with request correlation IDs; console in dev, JSON in prod |
-| **Uniform errors** | `AppException` hierarchy → one consistent JSON error body |
-| **Versioned API** | URL-based `/api/v1/`; liveness + readiness probes |
-| **Middleware** | Correlation ID, request timing (`X-Process-Time`), CORS |
+| **Uniform errors** | `AppException` hierarchy → one consistent JSON error body, incl. `request_id` |
+| **Security headers** | `nosniff`, `X-Frame-Options`/CSP `frame-ancestors`, `Referrer-Policy`, `Permissions-Policy`, opt-in HSTS |
+| **Trust boundary** | `TrustedHostMiddleware` (Host allow-list) + request-size cap → uniform `413` |
+| **Rate limiting** | `RateLimiter` Protocol + in-process limiter (opt-in); `429` + `Retry-After` |
+| **Downstream resilience** | Lifespan-managed shared `httpx` client (typed timeouts/limits) + retry/backoff that retries *only* classified transient failures |
+| **Versioned API** | URL-based `/api/v1/`; liveness + bounded readiness probes |
+| **Middleware** | Correlation ID, structured access log, security headers, request-size, rate limit, timing, CORS |
 | **Container** | Multi-stage uv Dockerfile, layer caching, non-root user, healthcheck |
 | **Quality gate** | `ruff`, `mypy --strict`, `pytest` + coverage, `pre-commit` — mirrored in CI |
 | **Agent-ready** | `AGENTS.md`, `CLAUDE.md`, Copilot instructions, ADRs, vertical-slice recipes |
@@ -139,7 +148,7 @@ app/
 │   ├── exception_handlers.py
 │   ├── lifespan.py         # async startup/shutdown seam
 │   └── logging.py          # structlog configuration
-├── middleware/             # ASGI middleware (timing)
+├── middleware/             # ASGI middleware (access log, security, request-size, rate limit, timing)
 ├── ai/                     # AI domain (business logic, no HTTP primitives)
 │   ├── schemas.py          # ChatMessage/Request/Response + ChatStreamEvent
 │   ├── providers.py        # ChatProvider Protocol + EchoChatProvider + get_provider
@@ -189,7 +198,10 @@ Each extension mirrors an existing pattern — small, predictable changes. Recip
 - **Add a real LLM provider** — implement `ChatProvider` with a lazy-imported SDK (opt-in extra),
   wire it into `build_provider()`, add settings (e.g. `OPENAI_API_KEY: SecretStr | None`). Never
   require a key for the `echo` path or for tests.
-- **Add a shared cache** — implement `CacheBackend` (e.g. Redis); the rest of the app is unchanged.
+- **Add a shared cache or rate limiter** — implement `CacheBackend` / `RateLimiter` against Redis;
+  the rest of the app is unchanged ([recipes](./docs/recipes/)).
+- **Call a downstream service** — inject the shared `HttpClientDep` and wrap calls with
+  `retry_async` + `raise_for_upstream` ([`docs/production.md`](./docs/production.md)).
 
 ## Deployment
 
@@ -223,7 +235,7 @@ in the [`Makefile`](./Makefile).
 | `POST` | `/api/v1/chat/` | Chat completion (cached) |
 | `POST` | `/api/v1/chat/stream` | Streaming chat completion (SSE) |
 | `GET` | `/api/v1/health/` | Liveness probe |
-| `GET` | `/api/v1/health/ready` | Readiness probe (round-trips the cache) |
+| `GET` | `/api/v1/health/ready` | Readiness probe (bounded cache + HTTP-client checks) |
 | `GET` · `POST` | `/api/v1/items/` | List / create — example resource |
 | `GET` · `PATCH` · `DELETE` | `/api/v1/items/{id}` | Get / update / delete — example resource |
 
@@ -232,6 +244,7 @@ in the [`Makefile`](./Makefile).
 
 **Docs:** [`AGENTS.md`](./AGENTS.md) · [`CONTRIBUTING.md`](./CONTRIBUTING.md) ·
 [`SECURITY.md`](./SECURITY.md) · [`docs/architecture.md`](./docs/architecture.md) ·
+[`docs/production.md`](./docs/production.md) · [`docs/recipes/`](./docs/recipes/) ·
 [`docs/deployment.md`](./docs/deployment.md) ·
 [ADR 0001](./docs/adr/0001-template-architecture.md) ·
 [ADR 0002](./docs/adr/0002-ai-application-building-blocks.md)

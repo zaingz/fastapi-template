@@ -1,11 +1,17 @@
 from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1.router import v1_router
 from app.core.config import get_settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.lifespan import lifespan
+from app.core.rate_limit import get_rate_limiter
+from app.middleware.access_log import AccessLogMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.request_size import RequestSizeLimitMiddleware
+from app.middleware.security import SecurityHeadersMiddleware
 from app.middleware.timing import TimingMiddleware
 
 
@@ -24,17 +30,27 @@ def create_application() -> FastAPI:
         redirect_slashes=False,
     )
 
-    # Middleware — registered in reverse execution order
-    # Last added = outermost (runs first on request, last on response)
+    # Middleware — registered in reverse execution order.
+    # Last added = outermost (runs first on request, last on response).
+    # Innermost first:
+    application.add_middleware(TimingMiddleware)
+    if settings.RATE_LIMIT_ENABLED:
+        application.add_middleware(RateLimitMiddleware, limiter=get_rate_limiter())
+    application.add_middleware(RequestSizeLimitMiddleware, max_bytes=settings.MAX_REQUEST_BYTES)
+    if settings.SECURITY_HEADERS_ENABLED:
+        application.add_middleware(SecurityHeadersMiddleware, settings=settings)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
         allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["X-Request-ID", "X-Process-Time"],
+        allow_headers=settings.CORS_ALLOW_HEADERS,
+        expose_headers=["X-Request-ID", "X-Process-Time", "X-RateLimit-Remaining"],
     )
-    application.add_middleware(TimingMiddleware)
+    if settings.ALLOWED_HOSTS:
+        application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
+    # Access log binds request_id into structlog contextvars; must run inside CorrelationId.
+    application.add_middleware(AccessLogMiddleware)
     application.add_middleware(CorrelationIdMiddleware)
 
     # Routers
