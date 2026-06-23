@@ -1,17 +1,18 @@
 import uuid
+from typing import Any
 
 from app.api.v1.schemas.items import ItemCreate, ItemList, ItemResponse, ItemUpdate
 from app.core.exceptions import NotFoundError
 
 # In-memory store — swap for a repository when DB is added
-_ITEMS: dict[str, dict] = {}
+_ITEMS: dict[str, dict[str, Any]] = {}
 
 
 class ItemService:
     """Item business logic. No HTTP primitives here."""
 
     def list_items(self) -> ItemList:
-        items = list(_ITEMS.values())
+        items = [ItemResponse(**item) for item in _ITEMS.values()]
         return ItemList(items=items, total=len(_ITEMS))
 
     def get_item(self, item_id: str) -> ItemResponse:

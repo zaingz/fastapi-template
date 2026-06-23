@@ -1,6 +1,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.ai.cache import get_cache
 from app.core.config import Settings, get_settings
 from app.main import create_application
 from app.services.items import _ITEMS
@@ -39,3 +40,11 @@ def clear_items():
     _ITEMS.clear()
     yield
     _ITEMS.clear()
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+    """Reset the in-process AI cache between tests."""
+    get_cache().clear()
+    yield
+    get_cache().clear()

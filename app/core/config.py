@@ -40,7 +40,17 @@ class Settings(BaseSettings):
     CORS_ALLOW_CREDENTIALS: bool = False
 
     # Security (placeholder for future auth extension)
-    SECRET_KEY: SecretStr = Field(default="change-me-in-production-must-be-32-chars-min")
+    SECRET_KEY: SecretStr = Field(default=SecretStr("change-me-in-production-must-be-32-chars-min"))
+
+    # AI provider — `echo` is the zero-dependency default (no API key, no network).
+    AI_PROVIDER: str = "echo"
+    AI_MODEL: str = "echo-1"
+    AI_PROMPT_VERSION: str = "v1"
+    OPENAI_API_KEY: SecretStr | None = None
+
+    # AI response cache (in-process exact-match)
+    CACHE_TTL: int = 300
+    CACHE_MAX_SIZE: int = 1024
 
     @property
     def is_production(self) -> bool:

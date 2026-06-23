@@ -1,3 +1,6 @@
+from typing import Any
+
+
 class AppException(Exception):  # noqa: N818
     """Base exception for all application exceptions."""
 
@@ -5,7 +8,7 @@ class AppException(Exception):  # noqa: N818
     code: str = "INTERNAL_ERROR"
     message: str = "An internal error occurred"
 
-    def __init__(self, message: str | None = None, details: dict | None = None) -> None:
+    def __init__(self, message: str | None = None, details: dict[str, Any] | None = None) -> None:
         self.message = message or self.__class__.message
         self.details = details or {}
         super().__init__(self.message)
