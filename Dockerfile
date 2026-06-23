@@ -36,14 +36,13 @@ ENV PATH="/app/.venv/bin:$PATH" \
 USER app
 WORKDIR /app
 
+# Platforms that inject $PORT (Cloud Run, Render, Railway, Fly) override this at runtime;
+# gunicorn.conf.py binds $PORT (default 8000). EXPOSE is documentation only.
+ENV PORT=8000
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/')"
+    CMD python -c "import os,urllib.request; urllib.request.urlopen(f\"http://localhost:{os.environ.get('PORT','8000')}/api/v1/health/\")"
 
-CMD ["gunicorn", "app.main:app", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--workers", "2", \
-     "--bind", "0.0.0.0:8000", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+# Bind/workers come from gunicorn.conf.py (reads $PORT and $WEB_CONCURRENCY).
+CMD ["gunicorn", "app.main:app", "--config", "gunicorn.conf.py"]

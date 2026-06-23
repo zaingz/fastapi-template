@@ -141,10 +141,10 @@ The template stays minimal. When the application needs them, wire these in at th
 - **Database** — SQLAlchemy 2.0 async engine + Alembic. Init the engine in `lifespan.py`
   (`app.state.db_engine`), expose an `AsyncSession` DI alias, replace the in-memory store in a
   service with a repository.
-- **Auth** — JWT dependency in `core/`, surfaced as an `Annotated` current-user alias; raise
-  `UnauthorizedError` / `ForbiddenError`.
+- **Auth** — JWT dependency in `core/`, surfaced as an `Annotated` current-user alias; add
+  `UnauthorizedError` (401) / `ForbiddenError` (403) `AppException` subclasses in `core/exceptions.py`.
 - **Background tasks** — ARQ or Celery; start/stop the worker client in `lifespan.py`.
-- **Rate limiting** — slowapi middleware; reuse the existing `RateLimitError`.
+- **Rate limiting** — slowapi middleware; add a `RateLimitError` (429) `AppException` subclass.
 - **Observability** — OpenTelemetry instrumentation alongside the structlog setup.
 
 See [`docs/adr/0001-template-architecture.md`](./adr/0001-template-architecture.md) for the

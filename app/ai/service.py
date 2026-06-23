@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator
@@ -5,7 +6,7 @@ from collections.abc import AsyncIterator
 import structlog
 
 from app.ai.cache import CacheBackend
-from app.ai.providers import ChatProvider
+from app.ai.providers import ChatProvider, ProviderTimeoutError
 from app.ai.schemas import ChatRequest, ChatResponse, ChatStreamEvent
 from app.core.config import Settings
 
@@ -21,6 +22,7 @@ class ChatService:
         self._ttl = settings.CACHE_TTL
         self._default_model = settings.AI_MODEL
         self._prompt_version = settings.AI_PROMPT_VERSION
+        self._timeout = settings.AI_REQUEST_TIMEOUT
 
     def _resolve_model(self, request: ChatRequest) -> str:
         return request.model or self._default_model
@@ -46,9 +48,15 @@ class ChatService:
             logger.debug("chat cache hit", key=key)
             return ChatResponse(model=model, content=cached, cached=True)
 
-        content = await self._provider.complete(
-            request.messages, model=model, temperature=request.temperature
-        )
+        try:
+            async with asyncio.timeout(self._timeout):
+                content = await self._provider.complete(
+                    request.messages, model=model, temperature=request.temperature
+                )
+        except TimeoutError as exc:
+            raise ProviderTimeoutError(
+                message=f"Provider '{self._provider.name}' timed out after {self._timeout}s"
+            ) from exc
         await self._cache.set(key, content, self._ttl)
         return ChatResponse(model=model, content=content, cached=False)
 
@@ -56,10 +64,18 @@ class ChatService:
         """Yield typed events. Streams are never cached (no-store)."""
         model = self._resolve_model(request)
         yield ChatStreamEvent(event="start", data={"model": model})
+        tokens = self._provider.stream(
+            request.messages, model=model, temperature=request.temperature
+        )
         try:
-            async for token in self._provider.stream(
-                request.messages, model=model, temperature=request.temperature
-            ):
+            while True:
+                # Per-token budget: guards against a stalled provider without
+                # capping the total length of a legitimately long stream.
+                try:
+                    async with asyncio.timeout(self._timeout):
+                        token = await anext(tokens)
+                except StopAsyncIteration:
+                    break
                 yield ChatStreamEvent(event="token", data={"text": token})
         except Exception as exc:  # surface provider failures as a typed terminal event
             logger.warning("chat stream failed", error=str(exc))

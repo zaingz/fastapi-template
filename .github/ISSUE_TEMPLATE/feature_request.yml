@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose an addition or change. Note the template stays lean by design.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This template prefers documented seams over bundled subsystems (auth, DB, queues, vector
+        DB, RAG). Heavy dependencies are "Ask first" — see AGENTS.md. Propose the seam, not the
+        framework.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What need is unmet? Who hits it and when?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What you want, and the smallest version that solves the problem (Ponytail ladder).
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including "keep it a documented seam instead of bundling it."
+    validations:
+      required: false

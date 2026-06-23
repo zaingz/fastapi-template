@@ -39,3 +39,44 @@ jobs:
 
       - name: Test
         run: uv run pytest tests/ -v --cov=app --cov-report=term-missing
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: fastapi-template:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run container on platform-injected PORT
+        run: |
+          docker run -d --name api -e PORT=9000 -p 9000:9000 fastapi-template:ci
+
+      - name: Smoke test health + readiness
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:9000/api/v1/health/ >/dev/null; then
+              echo "health up"; break
+            fi
+            sleep 1
+          done
+          curl -fsS http://localhost:9000/api/v1/health/ | tee /dev/stderr | grep -q '"status":"ok"'
+          curl -fsS http://localhost:9000/api/v1/health/ready | tee /dev/stderr | grep -q '"cache":"ok"'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs api
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f api

@@ -39,6 +39,13 @@ known ceiling and the upgrade path — so the next reader (human or agent) sees 
 **Deletion-first review pass.** Before declaring a task done, briefly list what you *removed or
 chose not to add* and why. Fewer moving parts is the goal; justify every new file and dependency.
 
+## Communication style (Caveman)
+
+Terse prose, exact technical substance. Drop filler, pleasantries, hedging, and repeated
+explanations. Preserve code, commands, URLs, file paths, headings, dates, and version numbers
+verbatim. Status pattern: *what changed → why → how verified → next step.* Code, commits, and PR
+text stay in normal professional style — Caveman applies to chat/status prose, not artifacts.
+
 ## Setup
 
 ```bash
@@ -91,6 +98,9 @@ may import `core`; nothing imports from `main` except the ASGI server.
   agnostic and async; the service is the only place provider + cache are combined.
 - **core/** is cross-cutting infrastructure only; no resource/business logic.
 - Errors are rendered uniformly by `core/exception_handlers.py`; don't hand-build error JSON.
+- **Routing convention** — the app sets `redirect_slashes=False`. Define and call endpoints with
+  their **trailing slash** (`/api/v1/chat/`, `/api/v1/items/`); a missing/extra slash 404s instead
+  of redirecting. Sub-paths like `/chat/stream` have no trailing slash.
 
 ## AI architecture (the building blocks)
 
@@ -150,6 +160,11 @@ Mirror the `items` resource — schema → service → endpoint → register →
   `clear_cache`).
 - Assert on status code **and** body, including the `error` code for failures. For streams, assert
   on the emitted event sequence.
+- **Streaming changes must test a provider failure → terminal `event: error`** (never a leaked
+  exception mid-stream). Use a test-only failing provider via `app.dependency_overrides[get_provider]`
+  — see `tests/ai/test_chat_reliability.py`.
+- To assert the uniform 500 body through the client, build an `ASGITransport(app, raise_app_exceptions=False)`
+  so the registered handler's body reaches the client (mirrors a real ASGI server).
 - Every behavior change ships with a test in the same PR.
 
 ## Config & dependencies
@@ -164,8 +179,12 @@ Mirror the `items` resource — schema → service → endpoint → register →
 
 - The container is the portable contract; the same image runs anywhere. See
   [`docs/deployment.md`](docs/deployment.md).
-- Honor `$PORT` if the platform sets it; expose health at `/api/v1/health/` and readiness at
-  `/api/v1/health/ready`. Provide secrets via environment, never baked into the image.
+- The ASGI server owns the network bind, not app `Settings`. `gunicorn.conf.py` reads `$PORT`
+  (default 8000) and `$WEB_CONCURRENCY` (workers) and uses the maintained `uvicorn_worker.UvicornWorker`.
+  Platforms that inject `$PORT` work out of the box.
+- Expose health at `/api/v1/health/` and readiness at `/api/v1/health/ready`. Provide secrets via
+  environment, never baked into the image. `SECRET_KEY` must be overridden when
+  `ENVIRONMENT=production` or the app refuses to boot.
 
 ## Always / Ask first / Never
 

@@ -12,4 +12,4 @@ async def test_ready_returns_200(async_client):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert "checks" in body
+    assert body["checks"]["cache"] == "ok"

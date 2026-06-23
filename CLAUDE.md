@@ -22,3 +22,9 @@ of truth. This file adds only Claude Code–specific operating notes.
   green. Don't silence the gate with `# type: ignore`, `# noqa`, or `--no-verify`.
 - **Deletion-first review.** Before finishing, note what you removed or chose not to add, and why.
 - New settings → typed `Settings` field **and** `.env.example`; secrets use `SecretStr`.
+- **Caveman status prose.** Terse, exact: *what changed → why → how verified → next step.* Drop
+  filler/hedging; preserve code, commands, paths, URLs, versions verbatim. Commits/PRs stay
+  professional. (Full rule in AGENTS.md.)
+- **Routing:** `redirect_slashes=False` — call trailing-slash endpoints (`/api/v1/chat/`).
+- **Streaming changes** must test provider failure → terminal `event: error`
+  (`tests/ai/test_chat_reliability.py`).

@@ -12,6 +12,12 @@ class ProviderConfigError(AppException):
     code = "PROVIDER_NOT_CONFIGURED"
 
 
+class ProviderTimeoutError(AppException):
+    status_code = 504
+    code = "PROVIDER_TIMEOUT"
+    message = "The AI provider did not respond in time"
+
+
 @runtime_checkable
 class ChatProvider(Protocol):
     """A chat completion backend. Implementations must be async and HTTP-agnostic.

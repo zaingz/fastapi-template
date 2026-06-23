@@ -9,7 +9,7 @@
 <br/>
 <br/>
 
-<code>AI-native</code> · <code>agent-ready</code> · <code>batteries-included</code> · <code>streaming</code> · <code>multi-tier caching</code> · <code>deployment-ready</code>
+<code>AI-native</code> · <code>agent-ready</code> · <code>batteries-included</code> · <code>streaming</code> · <code>response caching</code> · <code>deployment-ready</code>
 
 <br/>
 
@@ -225,10 +225,11 @@ make docker-build
 make docker-run        # serves on :8000 with your .env
 ```
 
-Honors `$PORT` where the platform injects it, exposes health at `/api/v1/health/` and readiness at
-`/api/v1/health/ready`, and reads all config (and secrets) from the environment. A provider matrix
-for Cloud Run, AWS App Runner/ECS, Azure Container Apps, Fly.io, Render, Railway, and DigitalOcean
-lives in [`docs/deployment.md`](./docs/deployment.md).
+Binds `$PORT` automatically (via `gunicorn.conf.py`, workers from `$WEB_CONCURRENCY`), exposes
+health at `/api/v1/health/` and a dependency-checking readiness probe at `/api/v1/health/ready`, and
+reads all config (and secrets) from the environment. In production `SECRET_KEY` must be overridden
+or the app refuses to boot. A provider matrix for Cloud Run, AWS App Runner/ECS, Azure Container
+Apps, Fly.io, Render, Railway, and DigitalOcean lives in [`docs/deployment.md`](./docs/deployment.md).
 
 ## Quality gates
 
@@ -264,6 +265,7 @@ Interactive docs at `/docs` (Swagger) and `/redoc` when `DEBUG=true`.
 ## Documentation
 
 - [`AGENTS.md`](./AGENTS.md) — the canonical contributor & agent contract
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to land a change; [`SECURITY.md`](./SECURITY.md) — reporting vulnerabilities
 - [`CLAUDE.md`](./CLAUDE.md) — Claude Code operating notes
 - [`docs/architecture.md`](./docs/architecture.md) — module map, request lifecycle, invariants, seams
 - [`docs/deployment.md`](./docs/deployment.md) — provider-neutral deployment guide

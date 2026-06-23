@@ -32,17 +32,6 @@ class ValidationError(AppException):
     code = "VALIDATION_FAILED"
 
 
-class UnauthorizedError(AppException):
-    status_code = 401
-    code = "UNAUTHORIZED"
-
-
-class ForbiddenError(AppException):
-    status_code = 403
-    code = "FORBIDDEN"
-
-
-class RateLimitError(AppException):
-    status_code = 429
-    code = "RATE_LIMITED"
-    message = "Too many requests"
+# ponytail: auth/rate-limit error types are intentionally absent — those features are
+# documented "Ask first" seams, not bundled. Add an AppException subclass here (status_code +
+# code) when you wire the matching feature; NotFoundError above is the pattern to copy.
