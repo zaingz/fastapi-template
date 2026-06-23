@@ -5,6 +5,7 @@ import structlog
 from fastapi import FastAPI
 
 from app.core.config import get_settings
+from app.core.http_client import build_async_client
 from app.core.logging import configure_logging
 
 logger = structlog.get_logger(__name__)
@@ -17,10 +18,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Code before yield runs at startup; code after yield runs at shutdown.
     The application receives traffic only while inside the yield block.
 
-    Extension point: Add database pool init, HTTP client init, etc.
+    Extension point: Add database pool init, etc., alongside the HTTP client below.
     """
     settings = get_settings()
     configure_logging(json_logs=settings.LOG_JSON, log_level=settings.LOG_LEVEL)
+
+    # Shared outbound client: pooled connections + bounded per-phase timeouts.
+    app.state.http_client = build_async_client(settings)
 
     logger.info(
         "Application starting",
@@ -29,13 +33,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         debug=settings.DEBUG,
     )
 
-    # Future extension points:
-    # app.state.http_client = httpx.AsyncClient()
+    # Future extension point:
     # app.state.db_engine = create_async_engine(...)
 
     yield
 
     # Shutdown
-    # Future: await app.state.http_client.aclose()
+    await app.state.http_client.aclose()
     # Future: await app.state.db_engine.dispose()
     logger.info("Application shutting down")

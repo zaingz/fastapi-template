@@ -1,10 +1,12 @@
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
 
 from app.ai.cache import CacheBackend, get_cache
 from app.core.dependencies import SettingsDep
+from app.core.http_client import HttpClientDep
 
 router = APIRouter()
 
@@ -44,20 +46,31 @@ async def _check_cache(cache: CacheBackend) -> str:
     return "ok" if await cache.get(probe_key) == "1" else "degraded"
 
 
+def _check_http_client(client: httpx.AsyncClient) -> str:
+    """Bounded, non-blocking check: the shared client exists and is open.
+
+    Deliberately makes no network call so readiness can't hang on a slow upstream.
+    """
+    return "ok" if not client.is_closed else "degraded"
+
+
 @router.get(
     "/ready",
     response_model=ReadyResponse,
     summary="Application readiness",
     description="Returns 200 if dependencies are reachable, 503 otherwise.",
 )
-async def ready(cache: CacheDep, response: Response) -> ReadyResponse:
+async def ready(cache: CacheDep, http_client: HttpClientDep, response: Response) -> ReadyResponse:
     """Readiness probe — are dependencies available?
 
     Checks every dependency on the request path and reports per-dependency status.
-    When you add a DB/Redis/provider, add its ping here and gate readiness on it
-    (return 503 if any check fails) so orchestrators stop routing to a broken pod.
+    Each check is bounded (no unbounded network waits) so the probe can't hang. When you
+    add a DB/Redis/provider, add its bounded ping here and gate readiness on it.
     """
-    checks = {"cache": await _check_cache(cache)}
+    checks = {
+        "cache": await _check_cache(cache),
+        "http_client": _check_http_client(http_client),
+    }
     ok = all(status == "ok" for status in checks.values())
     if not ok:
         response.status_code = 503

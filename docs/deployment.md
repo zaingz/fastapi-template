@@ -59,8 +59,10 @@ docker compose up --build      # http://localhost:8000  (docs at /docs when DEBU
 ## Readiness checks
 
 `GET /api/v1/health/ready` reports per-dependency status and returns `503` if any check fails.
-Out of the box it round-trips the in-process cache (`{"cache": "ok"}`). As you add dependencies on
-the request path, ping each one in `app/api/v1/endpoints/health.py` and include it in `checks`:
+Out of the box it round-trips the in-process cache and confirms the shared HTTP client is open
+(`{"cache": "ok", "http_client": "ok"}`) — both checks are bounded and make no blocking network
+call. As you add dependencies on the request path, add a **bounded** ping for each in
+`app/api/v1/endpoints/health.py` and include it in `checks`:
 
 - **Database** — a `SELECT 1` against the pool.
 - **Redis / shared cache** — a `PING`.
