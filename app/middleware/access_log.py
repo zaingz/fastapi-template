@@ -20,17 +20,21 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         request_id = correlation_id.get()
         structlog.contextvars.bind_contextvars(request_id=request_id)
         start = time.perf_counter()
+        # Default to 500: if call_next raises (unhandled exception), Starlette's
+        # ServerErrorMiddleware renders the 500 outside this middleware, so we record it
+        # here from the finally block and let the exception propagate.
+        status = 500
         try:
             response = await call_next(request)
+            status = response.status_code
+            return response
         finally:
-            duration_ms = round((time.perf_counter() - start) * 1000, 2)
-        logger.info(
-            "request",
-            method=request.method,
-            path=request.url.path,
-            status=response.status_code,
-            duration_ms=duration_ms,
-            request_id=request_id,
-        )
-        structlog.contextvars.unbind_contextvars("request_id")
-        return response
+            logger.info(
+                "request",
+                method=request.method,
+                path=request.url.path,
+                status=status,
+                duration_ms=round((time.perf_counter() - start) * 1000, 2),
+                request_id=request_id,
+            )
+            structlog.contextvars.unbind_contextvars("request_id")

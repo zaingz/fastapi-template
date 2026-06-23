@@ -2,7 +2,7 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import Self
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -89,6 +89,16 @@ class Settings(BaseSettings):
     # AI response cache (in-process exact-match)
     CACHE_TTL: int = 300
     CACHE_MAX_SIZE: int = 1024
+
+    @field_validator("CSP_FRAME_ANCESTORS", mode="after")
+    @classmethod
+    def _quote_csp_keyword(cls, value: str) -> str:
+        # CSP keywords (`none`/`self`) are only valid single-quoted; an unquoted `none` is
+        # read as a host source and the directive is ignored. python-dotenv strips surrounding
+        # quotes from `.env` values, so normalize bare keywords back to their quoted form.
+        if value.strip().lower() in {"none", "self"}:
+            return f"'{value.strip().lower()}'"
+        return value
 
     @property
     def is_production(self) -> bool:

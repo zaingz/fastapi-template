@@ -27,17 +27,28 @@ class RateLimiter(Protocol):
 class InMemoryFixedWindowRateLimiter:
     """Per-process fixed-window counter (stdlib only).
 
+    Expired buckets are evicted opportunistically once the dict exceeds `max_keys`, so a
+    client rotating source IPs (or high key cardinality) cannot grow memory without bound.
+
     ponytail: counts live in this process only, so N replicas allow N× the limit. For
     correct distributed limiting add a Redis-backed RateLimiter (see docs/recipes/redis-rate-limit.md).
     """
 
-    def __init__(self, *, limit: int, window_seconds: int) -> None:
+    def __init__(self, *, limit: int, window_seconds: int, max_keys: int = 10_000) -> None:
         self._limit = limit
         self._window = window_seconds
+        self._max_keys = max_keys
         self._buckets: dict[str, tuple[float, int]] = {}
+
+    def _prune_expired(self, now: float) -> None:
+        expired = [k for k, (start, _) in self._buckets.items() if now - start >= self._window]
+        for k in expired:
+            del self._buckets[k]
 
     async def acquire(self, key: str) -> RateLimitDecision:
         now = time.monotonic()
+        if len(self._buckets) >= self._max_keys:
+            self._prune_expired(now)
         window_start, count = self._buckets.get(key, (now, 0))
         if now - window_start >= self._window:
             window_start, count = now, 0

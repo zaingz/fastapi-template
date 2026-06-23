@@ -1,3 +1,6 @@
+import asyncio
+import time
+
 import httpx
 import pytest
 
@@ -86,3 +89,51 @@ async def test_retry_async_exhausts_then_raises():
 
     with pytest.raises(UpstreamTimeoutError):
         await retry_async(always_timeout, retries=2, base_delay=0.0, max_delay=0.0)
+
+
+async def test_retry_async_clamps_huge_retry_after_to_max_delay():
+    # A hostile/misconfigured upstream advertising a 1-hour Retry-After must not pin the
+    # caller; the honored delay is clamped to max_delay.
+    calls = 0
+
+    async def rate_limited() -> str:
+        nonlocal calls
+        calls += 1
+        if calls < 2:
+            raise UpstreamRateLimitError(retry_after=3600.0)
+        return "ok"
+
+    start = time.perf_counter()
+    result = await retry_async(rate_limited, retries=2, base_delay=0.0, max_delay=0.05)
+    elapsed = time.perf_counter() - start
+
+    assert result == "ok"
+    assert calls == 2
+    assert elapsed < 1.0  # clamped to ~0.05s, nowhere near the advertised 3600s
+
+
+async def test_retry_async_honors_retry_after_up_to_cap():
+    # The honored value still raises the floor (vs. jitter) but never exceeds max_delay.
+    async def rate_limited() -> str:
+        raise UpstreamRateLimitError(retry_after=10.0)
+
+    start = time.perf_counter()
+    with pytest.raises(UpstreamRateLimitError):
+        await retry_async(rate_limited, retries=1, base_delay=0.0, max_delay=0.05)
+    elapsed = time.perf_counter() - start
+    assert 0.04 <= elapsed < 1.0  # slept ~max_delay once, not 10s
+
+
+async def test_retry_async_propagates_cancellation():
+    # CancelledError is a BaseException, not UpstreamError, so it must propagate immediately
+    # and never be swallowed or retried.
+    calls = 0
+
+    async def cancelled() -> str:
+        nonlocal calls
+        calls += 1
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await retry_async(cancelled, retries=3, base_delay=0.0, max_delay=0.0)
+    assert calls == 1

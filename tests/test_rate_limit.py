@@ -23,6 +23,15 @@ async def test_limiter_keys_are_independent():
     assert (await limiter.acquire("b")).allowed
 
 
+async def test_limiter_evicts_expired_buckets_to_bound_memory():
+    # window=0 expires every bucket immediately; with a small max_keys the dict must not
+    # grow unbounded as distinct keys (e.g. rotating client IPs) arrive.
+    limiter = InMemoryFixedWindowRateLimiter(limit=10, window_seconds=0, max_keys=3)
+    for i in range(50):
+        await limiter.acquire(f"ip-{i}")
+    assert len(limiter._buckets) <= limiter._max_keys
+
+
 def _app_with_limiter(limit: int) -> FastAPI:
     app = FastAPI()
     app.add_middleware(

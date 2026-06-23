@@ -82,6 +82,14 @@ The in-process limiter counts **per process**, so N replicas allow N× the limit
 single-process dev and conservative protection, not for precise distributed limiting. For that, back
 the `RateLimiter` Protocol with Redis: [`recipes/redis-rate-limit.md`](recipes/redis-rate-limit.md).
 
+**Proxy caveat — the limiter keys on the direct peer IP** (`request.client.host`). Behind a load
+balancer or reverse proxy that is the *proxy's* IP, so every client collapses into one bucket and the
+limit becomes effectively global. To key per real client, run the ASGI server with proxy headers
+trusted (e.g. uvicorn `--proxy-headers --forwarded-allow-ips=<proxy-ip>`) so `request.client.host`
+reflects the client `X-Forwarded-For` — and only trust those headers when the proxy is the sole
+ingress. The limiter also evicts expired buckets once it exceeds an internal key cap, so high client
+cardinality (or IP rotation) does not grow memory without bound.
+
 ## DDoS: app layer vs. edge
 
 The application layer is **not** a DDoS mitigation and should not pretend to be. Divide

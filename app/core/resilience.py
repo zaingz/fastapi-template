@@ -76,8 +76,9 @@ async def retry_async[T](
     """Run an async operation, retrying ONLY classified transient upstream failures.
 
     Backoff is exponential with full jitter. A transient exception carrying `retry_after`
-    (e.g. a 429) waits at least that long. Non-transient exceptions propagate immediately —
-    there is no blanket `except Exception` retry.
+    (e.g. a 429) waits at least that long, but never longer than `max_delay` — a hostile or
+    misconfigured upstream returning `Retry-After: 3600` cannot pin the caller for an hour.
+    Non-transient exceptions propagate immediately — there is no blanket `except Exception` retry.
 
     ponytail: stdlib backoff, no extra dep. For richer policies (circuit breakers, deadline
     budgets) drop in `tenacity`/`stamina` as an optional extra — see docs/recipes/.
@@ -93,7 +94,9 @@ async def retry_async[T](
             delay = random.uniform(0, delay)  # noqa: S311 — jitter, not crypto
             retry_after = getattr(exc, "retry_after", None)
             if retry_after is not None:
-                delay = max(delay, float(retry_after))
+                # Honor the server's hint, but clamp to max_delay so a huge Retry-After
+                # can't hold the caller (and its worker/connection slot) far past the cap.
+                delay = min(max(delay, float(retry_after)), max_delay)
             logger.info(
                 "retrying upstream call",
                 attempt=attempt + 1,
