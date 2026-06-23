@@ -100,6 +100,11 @@ This template is designed to be extended. See the [Architecture Report](./docs/a
 | PATCH | `/api/v1/items/{id}` | Update item |
 | DELETE | `/api/v1/items/{id}` | Delete item |
 
+## Contributing & AI agents
+
+Conventions, layer rules, and the workflow contract live in [`AGENTS.md`](./AGENTS.md) (the
+canonical briefing for both humans and coding agents). Run `make check` before opening a PR.
+
 ## License
 
 MIT

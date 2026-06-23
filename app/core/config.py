@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     CORS_ALLOW_CREDENTIALS: bool = False
 
     # Security (placeholder for future auth extension)
-    SECRET_KEY: SecretStr = Field(default="change-me-in-production-must-be-32-chars-min")
+    SECRET_KEY: SecretStr = Field(default=SecretStr("change-me-in-production-must-be-32-chars-min"))
 
     @property
     def is_production(self) -> bool:

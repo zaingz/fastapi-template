@@ -1,4 +1,8 @@
-.PHONY: dev test lint format typecheck check docker-build docker-run sync lock clean
+.PHONY: install dev test test-cov lint format typecheck check precommit docker-build docker-run sync lock clean
+
+install:
+	uv sync --all-groups
+	uv run pre-commit install
 
 dev:
 	uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -19,6 +23,9 @@ typecheck:
 	uv run mypy app/
 
 check: lint typecheck test
+
+precommit:
+	uv run pre-commit run --all-files
 
 docker-build:
 	docker build -t fastapi-template:dev .

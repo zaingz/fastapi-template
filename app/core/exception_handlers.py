@@ -1,5 +1,6 @@
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -14,9 +15,9 @@ logger = logging.getLogger(__name__)
 def _error_body(
     error: str,
     message: str,
-    details: dict | list | None,
+    details: dict[str, Any] | list[Any] | None,
     path: str,
-) -> dict:
+) -> dict[str, Any]:
     return {
         "error": error,
         "message": message,
@@ -41,7 +42,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=_error_body(
                 "VALIDATION_FAILED",
                 "Request validation failed",
-                exc.errors(),
+                list(exc.errors()),
                 str(request.url.path),
             ),
         )
