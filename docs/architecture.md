@@ -17,15 +17,53 @@ app/
 │   └── logging.py               # structlog configuration (console or JSON)
 ├── middleware/                  # ASGI middleware
 │   └── timing.py                # X-Process-Time header
+├── ai/                          # AI domain (business logic, no HTTP primitives)
+│   ├── schemas.py               # ChatMessage/Request/Response + ChatStreamEvent
+│   ├── providers.py             # ChatProvider Protocol + EchoChatProvider + build/get_provider
+│   ├── cache.py                 # CacheBackend Protocol + InMemoryTTLCache + get_cache
+│   └── service.py               # ChatService: cache lookup/write + provider calls
 ├── api/v1/                      # versioned HTTP surface
 │   ├── router.py                # aggregates endpoint routers under /v1
-│   ├── endpoints/               # route handlers (HTTP only)
+│   ├── endpoints/               # route handlers (HTTP only; chat.py wires AI DI)
 │   └── schemas/                 # Pydantic request/response models
-└── services/                    # business logic (no HTTP primitives)
+└── services/                    # non-AI business logic (no HTTP primitives)
 ```
 
-The single import direction is **inward**: `api → services → core`. `core` and `services`
-never import from `api`. Nothing imports from `main` except the ASGI server.
+The single import direction is **inward**: `api → services → ai → core`. `core` never imports
+outward; `ai` may import `core`. Nothing imports from `main` except the ASGI server.
+
+## AI request lifecycle
+
+Non-streaming `POST /api/v1/chat`:
+
+1. The endpoint validates `ChatRequest` (message count + per-message length are trust-boundary caps).
+2. `get_chat_service` injects the singleton `ChatProvider` and `CacheBackend` and builds `ChatService`.
+3. `ChatService` computes a cache key over provider, model, `AI_PROMPT_VERSION`, temperature, and
+   messages. On hit it returns `cached=True`; on miss it calls `provider.complete()`, stores, returns.
+
+Streaming `POST /api/v1/chat/stream`:
+
+1. Same validation and DI.
+2. `ChatService.stream()` yields typed `ChatStreamEvent`s: `start` → `token`* → `done` (or a
+   terminal `error` if the provider raises — exceptions never escape mid-stream).
+3. The endpoint serializes each event to an SSE frame via `StreamingResponse`
+   (`text/event-stream`, `Cache-Control: no-store`, `X-Accel-Buffering: no`). Streams are not cached.
+
+### Provider seam
+
+`ChatProvider` is a `Protocol` (async `complete`/`stream`, plus a `name` used in the cache key).
+`EchoChatProvider` is the zero-dependency default — no API key, no network. `build_provider()`
+selects by `AI_PROVIDER`; `get_provider()` is the cached singleton. To add a real provider, implement
+the Protocol with a **lazy-imported** SDK behind an opt-in optional dependency and wire it into
+`build_provider()` — never put a key or SDK on the default path.
+
+### Caching tiers
+
+1. **In-process** — `InMemoryTTLCache` (TTL + LRU, stdlib), the default singleton via `get_cache()`.
+   Per-replica/per-worker.
+2. **Shared (Redis)** — implement `CacheBackend` against Redis as an opt-in dependency for
+   multi-instance deployments. Documented seam; not bundled.
+3. **Semantic/vector** — out of scope for the starter; left as a future seam.
 
 ## Request lifecycle
 
