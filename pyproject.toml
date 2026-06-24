@@ -7,10 +7,10 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Zain Zafar" }]
 dependencies = [
-    "fastapi[standard]>=0.115,<1.0",
-    "gunicorn>=23.0",
-    "structlog>=24.1",
-    "asgi-correlation-id>=4.3",
+    "fastapi[standard]>=0.138.0,<1.0",
+    "gunicorn>=26.0.0",
+    "structlog>=26.1.0",
+    "asgi-correlation-id>=5.0.1",
     "uvicorn-worker>=0.3",
     # Shared outbound HTTP client for downstream calls (already pulled in by fastapi[standard]).
     "httpx>=0.28",
@@ -23,13 +23,13 @@ redis = ["redis>=5.0"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.3",
-    "pytest-asyncio>=0.24",
-    "pytest-cov>=6.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
     "httpx>=0.28",
-    "ruff>=0.9",
-    "mypy>=1.14",
-    "pre-commit>=4.1",
+    "ruff>=0.15.19",
+    "mypy>=2.1.0",
+    "pre-commit>=4.6.0",
 ]
 
 [build-system]
