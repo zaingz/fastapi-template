@@ -5,7 +5,7 @@ description = "A minimal, production-ready FastAPI starter template"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "Zain Ghulam Zada" }]
+authors = [{ name = "Zain Zafar" }]
 dependencies = [
     "fastapi[standard]>=0.115,<1.0",
     "gunicorn>=23.0",

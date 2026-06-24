@@ -251,4 +251,4 @@ in the [`Makefile`](./Makefile).
 
 ## License
 
-MIT © Zain Ghulam Zada — see [`LICENSE`](./LICENSE).
+MIT © Zain Zafar — see [`LICENSE`](./LICENSE).
