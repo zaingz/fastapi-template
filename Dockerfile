@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.9
 # ── Stage 1: Builder ────────────────────────────────────────────────────────
-FROM python:3.12-slim-bookworm AS builder
+FROM python:3.14-slim-bookworm AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.6.14 /uv /uvx /bin/
 
@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 
 # ── Stage 2: Runtime ─────────────────────────────────────────────────────────
-FROM python:3.12-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 RUN groupadd -r app && useradd -r -d /app -g app -s /sbin/nologin app
 
